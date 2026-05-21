@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/0/979662f0c65d4fb7954a4adf102da7da/artifacts
+end_time: 1742499750344
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 979662f0c65d4fb7954a4adf102da7da
+run_name: learned-shoat-34
+run_uuid: 979662f0c65d4fb7954a4adf102da7da
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1742499720502
+status: 3
+tags: []
+user_id: nishc

@@ -1,0 +1,163 @@
+pipeline {
+    agent any
+
+    // Note: This pipeline requires Docker access. Ensure one of the following is configured:
+    // 1. The Jenkins user has been added to the docker group: usermod -aG docker jenkins
+    // 2. The Jenkins user has sudo access to run docker commands without password
+    // 3. The Docker socket permissions have been modified: chmod 666 /var/run/docker.sock
+
+    // Configure GitHub webhook trigger
+    triggers {
+        githubPush()
+    }
+
+    // Define which paths should trigger the pipeline
+    options {
+        skipDefaultCheckout(false)
+    }
+
+    environment {
+        // Load credentials from env_variables.json
+        MLFLOW_TRACKING_URI = credentials('MLFLOW_TRACKING_URI')
+        GCP_PROJECT_ID = credentials('GCP_PROJECT_ID')
+        GCP_BUCKET_NAME = credentials('GCP_BUCKET_NAME')
+        GOOGLE_APPLICATION_CREDENTIALS = credentials('GOOGLE_APPLICATION_CREDENTIALS')
+        EMAIL_ADDRESS = credentials('EMAIL_ADDRESS')
+        // Additional environment variables
+        ARTIFACT_REGISTRY_REPO = credentials('ARTIFACT_REGISTRY_REPO')
+        WORKSPACE_DIR = "retraining_pipeline"
+        MODEL_OUTPUT_DIR = "${WORKSPACE_DIR}/model_registry"
+        DATA_DIR = "${WORKSPACE_DIR}/data"
+    }
+
+    stages {
+        stage('Check Branch and Changed Files') {
+            steps {
+            script {
+            // Get the branch name from Jenkins environment variables first
+            def branchName = env.GIT_BRANCH ?: sh(script: 'git rev-parse --abbrev-ref HEAD || echo "unknown"', returnStdout: true).trim()
+            
+            // Clean up branch name (remove 'origin/' prefix if present)
+            branchName = branchName.replace('origin/', '')
+            echo "Current branch: ${branchName}"
+
+            // Define allowed branches (without 'origin/' prefix)
+            def allowedBranches = ['main', 'master', 'develop','retrain_pipeline']
+
+            // Check if current branch is allowed
+            if (!allowedBranches.contains(branchName)) {
+                echo "Current branch ${branchName} is not in the allowed list: ${allowedBranches}. Skipping pipeline execution."
+                currentBuild.result = 'SUCCESS'
+                error("Skipping pipeline execution as branch ${branchName} is not in the allowed list.")
+            }
+
+                    echo "Branch ${branchName} is allowed. Checking changed files..."
+
+                    // Get the list of changed files
+                    def changedFiles = sh(script: 'git diff --name-only HEAD^ HEAD || git diff --name-only origin/main...HEAD || echo "No changes detected"', returnStdout: true).trim()
+                    echo "Changed files: ${changedFiles}"
+
+                    // Define specific files that should trigger the pipeline
+                    def relevantFiles = [
+                        'src/model_training/similarity_with_xgboost.py',
+                        'src/data_processing/data_preprocessing.py'
+                    ]
+
+                    // Check if any changed file is in our list of relevant files
+                    def shouldRun = false
+                    for (def file in changedFiles.split("\n")) {
+                        if (relevantFiles.contains(file)) {
+                            echo "Relevant file changed: ${file}"
+                            shouldRun = true
+                            break
+                        }
+                    }
+
+                    // Skip the rest of the pipeline if no relevant files were changed
+                    if (!shouldRun) {
+                        echo "No relevant files were changed. Skipping pipeline execution."
+                        currentBuild.result = 'SUCCESS'
+                        error("Skipping pipeline execution as no relevant files were changed.")
+                    }
+
+                    echo "Branch ${branchName} is allowed and relevant files were changed. Proceeding with pipeline execution."
+                }
+            }
+        }
+
+        stage('Setup Python Environment') {
+            steps {
+                sh '''
+                cd ${WORKSPACE_DIR}
+                python3 -m venv venv
+                . venv/bin/activate
+                pip install --upgrade pip
+                pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Download Data from GCS') {
+            steps {
+                sh '''
+                cd ${WORKSPACE_DIR}
+                . venv/bin/activate
+                mkdir -p ${DATA_DIR}
+                python download_from_gcs.py
+                '''
+            }
+        }
+
+        stage('Train Model') {
+            steps {
+                sh '''
+                cd ${WORKSPACE_DIR}
+                . venv/bin/activate
+                mkdir -p ${MODEL_OUTPUT_DIR}
+                python run_retraining.py
+                '''
+            }
+        }
+
+        stage('Build and Push Docker Image') {
+            steps {
+                withCredentials([file(credentialsId: 'GOOGLE_APPLICATION_CREDENTIALS', variable: 'GCP_KEY_FILE')]) {
+                    sh '''
+                    cd ${WORKSPACE_DIR}
+                    . venv/bin/activate
+
+                    # Use the GCP key file provided by Jenkins
+                    export GOOGLE_APPLICATION_CREDENTIALS="${GCP_KEY_FILE}"
+
+                    # Verify the file exists and is valid JSON
+                    cat "${GOOGLE_APPLICATION_CREDENTIALS}" | jq . > /dev/null || echo "Warning: Credentials file is not valid JSON"
+
+                    # Ensure Jenkins can run Docker commands with sudo
+                    # This assumes the Jenkins user has been added to the sudoers file with NOPASSWD for docker commands
+                    # If this fails, you'll need to configure sudoers on the Jenkins server
+                    sudo -n true || echo "Warning: Jenkins user may not have sudo privileges without password"
+
+                    python push_to_artifactory.py
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            emailext (
+                subject: "Pipeline Success: ${currentBuild.fullDisplayName}",
+                body: "The model retraining pipeline completed successfully. Check MLflow for model metrics.",
+                to: "${EMAIL_ADDRESS}"
+            )
+        }
+        failure {
+            emailext (
+                subject: "Pipeline Failed: ${currentBuild.fullDisplayName}",
+                body: "The model retraining pipeline failed. Please check the Jenkins logs for details.",
+                to: "${EMAIL_ADDRESS}"
+            )
+        }
+    }
+}

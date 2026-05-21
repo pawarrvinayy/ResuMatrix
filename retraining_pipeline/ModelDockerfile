@@ -1,0 +1,16 @@
+FROM python:3.12-slim
+
+# Set working directory
+WORKDIR /app
+
+# Copy the model file
+COPY xgboost_model_test.joblib /app/model.joblib
+
+# Install dependencies
+RUN pip install --no-cache-dir joblib scikit-learn xgboost numpy
+
+# Create an entrypoint script
+RUN echo '#!/bin/bash\necho "Model container is running. Use this container as a base for inference."' > /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]

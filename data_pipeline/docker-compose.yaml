@@ -1,0 +1,180 @@
+# Basic Airflow cluster configuration for CeleryExecutor with Redis and PostgreSQL.
+#
+# WARNING: This configuration is for local development. Do not use it in a production deployment.
+#
+# This configuration supports basic configuration using environment variables or an .env file
+# The following variables are supported:
+#
+# AIRFLOW_IMAGE_NAME           - Docker image name used to run Airflow.
+#                                Default: apache/airflow:2.10.5
+# AIRFLOW_UID                  - User ID in Airflow containers
+#                                Default: 50000
+# AIRFLOW_PROJ_DIR             - Base path to which all the files will be volumed.
+#                                Default: .
+# Those configurations are useful mostly in case of standalone testing/running Airflow in test/try-out mode
+#
+# _AIRFLOW_WWW_USER_USERNAME   - Username for the administrator account (if requested).
+#                                Default: airflow
+# _AIRFLOW_WWW_USER_PASSWORD   - Password for the administrator account (if requested).
+#                                Default: airflow
+# _PIP_ADDITIONAL_REQUIREMENTS - Additional PIP requirements to add when starting all containers.
+#                                Use this option ONLY for quick checks. Installing requirements at container
+#                                startup is done EVERY TIME the service is started.
+#                                A better way is to build a custom image or extend the official image
+#                                as described in https://airflow.apache.org/docs/docker-stack/build.html.
+#                                Default: ''
+#
+# Feel free to modify this file to suit your needs.
+---
+x-airflow-common:
+  &airflow-common
+  build: .
+  env_file:
+    - ./.env
+  environment:
+    &airflow-common-env
+    AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+    AIRFLOW_GID: ${AIRFLOW_GID:-0}
+    # Explicitly set Supabase variables with defaults for safety
+    SUPABASE_URL: ${SUPABASE_URL:-}
+    SUPABASE_KEY: ${SUPABASE_API_KEY:-}
+    SUPABASE_API_KEY: ${SUPABASE_API_KEY:-}
+    # API URL for connecting to host machine
+    RESUMATRIX_API_URL: 'http://host.docker.internal:8000/api'
+    # GCP-related environment variables
+    AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT: 'google-cloud-platform://?extra__google_cloud_platform__key_path=/etc/secrets/gcp_key.json'
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+    GOOGLE_APPLICATION_CREDENTIALS: /etc/secrets/gcp_key.json
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    AIRFLOW__CORE__LOGGING_LEVEL: INFO
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: '/opt/airflow/logs'
+    AIRFLOW__LOGGING__DAG_PROCESSOR_MANAGER_LOG_LOCATION: '/opt/airflow/logs/dag_processor_manager/dag_processor_manager.log'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    PYTHONPATH: /opt/airflow/src
+    # SMTP configurations
+    AIRFLOW__SMTP__SMTP_HOST: smtp.gmail.com
+    AIRFLOW__SMTP__SMTP_STARTTLS: 'true'
+    AIRFLOW__SMTP__SMTP_SSL: 'false'
+    AIRFLOW__SMTP__SMTP_USER: 'mlops.team20@gmail.com'
+    AIRFLOW__SMTP__SMTP_PASSWORD: 'mrrb ubti ldnz hrve'
+    AIRFLOW__SMTP__SMTP_PORT: '587'
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: 'mlops.team20@gmail.com'
+  # env_file already specified above
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+    - logs-volume:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
+    - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
+    - ../src:/opt/airflow/src
+    - ${GCP_JSON_PATH}:/etc/secrets/gcp_key.json:ro
+    - ./requirements.txt:/requirements.txt
+  user: "${AIRFLOW_UID:-50000}:0"
+  # Add host.docker.internal mapping for Linux hosts
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  # Default entrypoint will be used
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db init
+        airflow users create \
+          --username ${_AIRFLOW_WWW_USER_USERNAME:-admin} \
+          --firstname admin \
+          --lastname admin \
+          --role Admin \
+          --email admin@example.com \
+          --password ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+
+        # Fix permissions for logs directory
+        mkdir -p /opt/airflow/logs
+        chmod -R 777 /opt/airflow/logs
+        chown -R ${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0} /opt/airflow/logs
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+    user: "0:0"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: airflow webserver
+    ports:
+      - "8085:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: airflow scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db-volume:
+  logs-volume:

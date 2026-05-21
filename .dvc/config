@@ -1,0 +1,5 @@
+[core]
+    remote = mlops-data
+['remote "mlops-data"']
+    url = gs://us-east1-mlops-dev-8ad13d78-bucket/data
+    credentialpath = ../../gcp-keys/awesome-nimbus-452221-v2-2044ce9b2556.json

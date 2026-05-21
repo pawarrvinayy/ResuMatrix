@@ -1,0 +1,42 @@
+[project]
+name = "resumatrix-frontend"
+version = "0.1.0"
+description = "Streamlit frontend for ResuMatrix"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "google==3.0.0",
+    "google.genai==1.9.0",
+    "python-dotenv==0.21.0",
+    "pymupdf==1.25.5",
+    "mammoth==1.9.0",
+    "libmagic==1.0",
+    "python-magic==0.4.27",
+    "psycopg2-binary==2.9.10",
+    "pydantic==2.10.6",
+    "pydantic_core==2.27.2",
+    "pydantic_settings==2.6.1",
+    "entrypoints==0.4",
+    "fastapi==0.115.11",            
+    "fastapi.responses==0.2.1",
+    "google-api-core==2.24.1",
+    "google-auth==2.38.0",
+    "google-auth-oauthlib==1.2.1",
+    "google-cloud-core==2.4.2",
+    "google-cloud-storage==3.1.0",
+    "google-crc32c==1.6.0",
+    "google-resumable-media==2.7.2",
+    "googleapis-common-protos==1.68.0",
+    "supabase==2.15.0",
+    "streamlit==1.40.1",
+    "bcrypt==3.2.0",
+    "pymongo==4.11.3",
+    "PyPDF2==3.0.1",
+    "python-docx==1.1.2",
+    "requests==2.32.3",
+    "requests-oauthlib==2.0.0",
+    "requests-toolbelt==1.0.0",
+    "docx==0.2.4",
+    "groq"
+]
