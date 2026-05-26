@@ -158,111 +158,86 @@ Resume:
     return result
 
 
-# ── STEP 3: Compute section scores ────────────────────────────────────────────
+# ── STEP 3: Intelligent single-call scorer ────────────────────────────────────
 
-EDUCATION_LEVELS = {
-    "none": 0, "high school": 1, "associate": 2, "bachelor": 3,
-    "master": 4, "mba": 4, "phd": 5, "doctorate": 5,
-}
-
-def _edu_level(text: str) -> int:
-    t = text.lower()
-    for key, val in sorted(EDUCATION_LEVELS.items(), key=lambda x: -x[1]):
-        if key in t:
-            return val
-    return 0
-
-
-def skills_score(jd: dict, profile: dict) -> float:
-    required = [s.lower().strip() for s in jd["required_skills"]]
-    if not required:
-        return 100.0
-    candidate = [s.lower().strip() for s in profile["skills"]]
-    matched = sum(1 for skill in required if any(
-        skill in c or c in skill for c in candidate
-    ))
-    return round(matched / len(required) * 100, 1)
-
-
-def experience_score(jd: dict, profile: dict) -> float:
-    required = jd["min_years_experience"]
-    if required == 0:
-        return 100.0
-    actual = profile["years_experience"]
-    if actual >= required:
-        return 100.0
-    return round(actual / required * 100, 1)
-
-
-def education_score(jd: dict, profile: dict) -> float:
-    required_level = _edu_level(jd["education_required"])
-    if required_level == 0:
-        return 100.0
-    candidate_level = _edu_level(profile["education"])
-    if candidate_level >= required_level:
-        return 100.0
-    if candidate_level == required_level - 1:
-        return 70.0
-    return 40.0
-
-
-def projects_score(jd: dict, profile: dict) -> float:
-    """Use LLM to assess how well the candidate's projects/titles cover the
-    key responsibilities. Returns 0-100."""
-    responsibilities = jd["key_responsibilities"]
-    if not responsibilities:
-        return 100.0
-    candidate_context = (
-        "Recent titles: " + ", ".join(profile["recent_titles"]) + "\n"
-        "Projects: " + "\n".join(f"- {p}" for p in profile["projects"])
-    )
+def intelligent_scorer(jd: dict, profile: dict) -> dict:
+    """Single GPT-4o-mini call returning scores, per-section reasoning,
+    a recruiter summary, and missing keywords."""
     system = (
-        "You are an objective recruiter evaluator. "
-        "Return ONLY valid JSON with a single key 'score' (integer 0-100)."
+        "You are a senior engineering recruiter with 10 years of experience screening "
+        "technical candidates. Analyze candidate fit carefully and honestly. Consider "
+        "transferable skills, not just exact keyword matches. Consider depth and recency "
+        "of experience. Be critical — most candidates are not perfect fits. "
+        "Return ONLY valid JSON, no other text."
     )
-    user = f"""Rate how well the candidate's experience covers these key responsibilities.
+    user = f"""Score this candidate against the job requirements.
 
-Key responsibilities:
-{json.dumps(responsibilities, indent=2)}
+JD Requirements:
+- Required skills: {jd["required_skills"]}
+- Preferred skills: {jd["preferred_skills"]}
+- Min experience: {jd["min_years_experience"]} years
+- Education: {jd["education_required"]}
+- Key responsibilities: {jd["key_responsibilities"]}
 
-Candidate's background:
-{candidate_context}
+Candidate Profile:
+- Skills: {profile["skills"]}
+- Years experience: {profile["years_experience"]}
+- Education: {profile["education"]}
+- Recent titles: {profile["recent_titles"]}
+- Projects: {profile["projects"]}
 
-Score rubric:
-- 90-100: Directly relevant experience for most responsibilities
-- 70-89:  Relevant experience for several responsibilities
-- 50-69:  Some overlap but significant gaps
-- 30-49:  Limited relevance
-- 0-29:   Little to no relevant experience
+Return this exact JSON:
+{{
+  "reasoning": {{
+    "skills": "2-3 sentences analyzing skill match and gaps honestly",
+    "experience": "2-3 sentences on experience relevance and depth",
+    "education": "1 sentence on education fit",
+    "projects": "2-3 sentences on whether projects show real applied experience"
+  }},
+  "scores": {{
+    "skills": <integer 0-100>,
+    "experience": <integer 0-100>,
+    "education": <integer 0-100>,
+    "projects": <integer 0-100>
+  }},
+  "summary": "One honest recruiter verdict sentence",
+  "missing_keywords": ["list only specific skills, technologies, or tools mentioned in the JD that are absent from the resume — short keywords only like 'Airflow', 'LangChain', 'Docker', 'RAG' — NOT full sentences, NOT responsibilities"]
+}}"""
 
-Return: {{"score": <integer 0-100>}}"""
+    fallback = {
+        "reasoning": {
+            "skills": "Unable to assess.",
+            "experience": "Unable to assess.",
+            "education": "Unable to assess.",
+            "projects": "Unable to assess.",
+        },
+        "scores": {"skills": 50, "experience": 50, "education": 50, "projects": 50},
+        "summary": "Assessment unavailable.",
+        "missing_keywords": [],
+    }
+    raw = chat(system, user, temperature=0)
+    result = parse_json(raw, fallback)
 
-    raw = chat(system, user)
-    result = parse_json(raw, {"score": 50})
-    try:
-        return float(result.get("score", 50))
-    except (TypeError, ValueError):
-        return 50.0
-
-
-def compute_scores(jd: dict, profile: dict) -> dict:
-    sk = skills_score(jd, profile)
-    ex = experience_score(jd, profile)
-    ed = education_score(jd, profile)
-    pr = projects_score(jd, profile)
-    overall = round(
-        sk * WEIGHTS["skills"]
-        + ex * WEIGHTS["experience"]
-        + ed * WEIGHTS["education"]
-        + pr * WEIGHTS["projects"],
+    scores_raw = result.get("scores") or {}
+    scores = {
+        "skills":     float(scores_raw.get("skills",     50)),
+        "experience": float(scores_raw.get("experience", 50)),
+        "education":  float(scores_raw.get("education",  50)),
+        "projects":   float(scores_raw.get("projects",   50)),
+    }
+    scores["overall"] = round(
+        scores["skills"]     * WEIGHTS["skills"]
+        + scores["experience"] * WEIGHTS["experience"]
+        + scores["education"]  * WEIGHTS["education"]
+        + scores["projects"]   * WEIGHTS["projects"],
         1,
     )
+
     return {
-        "skills": sk,
-        "experience": ex,
-        "education": ed,
-        "projects": pr,
-        "overall": overall,
+        "scores": scores,
+        "reasoning": result.get("reasoning") or fallback["reasoning"],
+        "summary": result.get("summary") or fallback["summary"],
+        "missing_keywords": result.get("missing_keywords") or [],
     }
 
 
@@ -314,15 +289,22 @@ for i, resume in enumerate(resumes):
     print(f"    Skills: {profile['skills'][:4]}, Exp: {profile['years_experience']}y, "
           f"Edu: {profile['education']}")
 
-    # 4c. Compute scores
-    scores = compute_scores(jd_req, profile)
+    # 4c. Score with single intelligent LLM call
+    print("    Scoring...")
+    result = intelligent_scorer(jd_req, profile)
+    scores = result["scores"]
     print(f"    Scores → skills:{scores['skills']} exp:{scores['experience']} "
           f"edu:{scores['education']} proj:{scores['projects']} "
           f"overall:{scores['overall']}")
+    print(f"    Summary: {result['summary']}")
+    print(f"    Missing: {result['missing_keywords']}")
 
     scored.append({
         "id": resume["id"],
         "scores": scores,
+        "reasoning": result["reasoning"],
+        "summary": result["summary"],
+        "missing_keywords": result["missing_keywords"],
         "fit": scores["overall"] >= FIT_THRESHOLD,
     })
 
@@ -349,6 +331,9 @@ for rank, resume in enumerate(fit_resumes, start=1):
         "fit_probability": round(s["overall"] / 100, 4),
         "status": rank,
         "section_scores": json.dumps(section_scores),
+        "reasoning": json.dumps(resume["reasoning"]),
+        "summary": resume["summary"],
+        "missing_keywords": json.dumps(resume["missing_keywords"]),
     }).eq("id", resume["id"]).execute()
     print(f"  #{rank} {resume['id']} — {s['overall']}%")
 
@@ -364,6 +349,9 @@ for resume in unfit_resumes:
         "fit_probability": round(s["overall"] / 100, 4),
         "status": -1,
         "section_scores": json.dumps(section_scores),
+        "reasoning": json.dumps(resume["reasoning"]),
+        "summary": resume["summary"],
+        "missing_keywords": json.dumps(resume["missing_keywords"]),
     }).eq("id", resume["id"]).execute()
     print(f"  UNFIT {resume['id']} — {s['overall']}%")
 
