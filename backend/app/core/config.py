@@ -20,14 +20,18 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_API_KEY: str
     
-    # Gemini
-    GOOGLE_API_KEY: str
-    LLM_DEFAULT:  str = "gemini-2.0-flash-lite"
-    LLM_FALLBACK: str = "gemini-2.0-flash"
+    # Gemini (kept for reference, no longer used by active services)
+    GOOGLE_API_KEY: str = ""
+    LLM_DEFAULT:  str = "gpt-4o-mini"
+    LLM_FALLBACK: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_ATTEMPTS: int = 3
     LLM_TOP_P: float = 0.95
     LLM_STOP_SEQUENCES: List = ['\n\n']
+
+    # OpenAI
+    OPENAI_API_KEY: str
+    GPT_DEFAULT: str = "gpt-4o-mini"
 
     # Pinecone
     PINECONE_API_KEY: str

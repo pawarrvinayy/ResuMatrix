@@ -5,70 +5,123 @@ class ResumePromptTemplates:
     @staticmethod
     def get_resume_prompt_template():
         """Return the standard resume extraction prompt template."""
-        return """Given the resume text, create a structured JSON representation following these guidelines:
+        return """Given the resume text below, extract and return a structured JSON object.
 
-# CRITICAL INSTRUCTION
-- DO NOT add any information that is not explicitly stated in the original resume
+# CRITICAL INSTRUCTIONS
+- DO NOT add any information not explicitly stated in the resume
 - Do not hallucinate or invent details, skills, dates, or responsibilities
-- If information is missing or unclear, leave the corresponding field empty rather than guessing
-- Only include verifiable information from the provided text
-- DO NOT INCLUE TIME IN DATETIME OUTPUTS
+- If information is missing, use "" for strings or [] for arrays — never null
+- DO NOT include time in datetime outputs; format dates as YYYY-MM-DD
+- Convert all gendered pronouns to gender-neutral alternatives (they/them)
 
-- Use exactly 2 spaces for indentation
-- NEVER use tab characters (\\t)
-- Avoid line breaks within field values
+# Output Schema — you MUST return JSON matching this exact structure:
+{
+  "basics": {
+    "name": "",
+    "email": "",
+    "phone": "",
+    "website": "",
+    "summary": "3-sentence summary of the candidate highlighting key strengths",
+    "location": {
+      "address": "",
+      "postalCode": "",
+      "city": "",
+      "countryCode": ""
+    },
+    "github": "",
+    "linkedin": "",
+    "twitter": "",
+    "languages": [
+      {"language": "English", "fluency": "Native speaker"}
+    ]
+  },
+  "workexp": [
+    {
+      "companyName": "Acme Corp",
+      "position": "Software Engineer",
+      "startDate": "2021-06-01",
+      "endDate": "2023-08-31",
+      "summary": ["Responsibility or achievement as a bullet string", "Another bullet"],
+      "skills": ["Python", "PostgreSQL", "Docker"]
+    }
+  ],
+  "education": [
+    "Master of Science in Computer Science, MIT, 2020-09-01 to 2022-05-31, GPA 3.9"
+  ],
+  "personal_projects": [
+    {
+      "projectName": "My ML Project",
+      "startDate": "2022-01-01",
+      "endDate": "2022-05-01",
+      "highlights": ["Built a classifier with 94% accuracy", "Deployed on AWS Lambda"],
+      "projectUrl": "",
+      "keywords": ["Python", "scikit-learn", "AWS"]
+    }
+  ],
+  "skills": ["Python", "SQL", "Machine Learning"],
+  "awards": [
+    {
+      "title": "Dean's List",
+      "dateReceived": "2021-05-01",
+      "awarder": "Boston University",
+      "summary": ""
+    }
+  ],
+  "certificates": [
+    {
+      "certificateName": "AWS Certified Solutions Architect",
+      "dateIssued": "2022-03-01",
+      "issuer": "Amazon Web Services",
+      "certificateUrl": ""
+    }
+  ],
+  "publications": [
+    {
+      "publicationName": "Deep Learning for NLP",
+      "publisherName": "NeurIPS",
+      "releaseDate": "2023-12-01",
+      "publicationUrl": "",
+      "summary": ""
+    }
+  ]
+}
 
-# Education
-- Format the education segment in 1-2 lines for each degree/endeavor. Write a complete conversational sentence.
-  An example is - The candidate pursued a Bachelor of Engineering at Boston University from 01/04/2017 to 01/04/2021 and has secured a GPA of 3.4 out of 4. The candidate made it to the dean's list.
-  Another example - The candidate is currently a graduate student majoring in Data Science at Northeastern University. They started their course on 01/09/2023 and are expected to complete it by 12/01/2025. 
+# Field Rules
 
-  They have a grade of 9.5 out of 10 and have studied subjects like Machine Learning, Natural Language Processing and Computer Vision. 
+## basics
+- summary: 3 sentences max, highlight key skills and experience level
+- github/linkedin: full URLs if found; "" if not present
+- languages: only include non-English languages plus English if explicitly stated; omit if none mentioned
+- location: fill only what is explicitly stated; use "" for unknown subfields
 
-# Work Experience Extraction
+## education
+- MUST be a flat list of strings — one string per degree
+- Format: "Degree Name, Institution, start-date to end-date[, GPA if stated][, additional notes]"
+- Example: "Bachelor of Engineering in Computer Science, Boston University, 2017-04-01 to 2021-04-01, GPA 3.4/4.0, Dean's List"
+- Do NOT return education as objects — strings only
 
-- Clearly distinguish between actual employment and educational projects
-- For each position capture: company, title, dates, responsibilities, and key skills
-- If multiple positions exist at the same company, represent them as separate experiences
-- Include all work experiences mentioned in the resume.
-- Extract date information carefully - if dates appear as "01/1to01/1" pattern, try to infer actual dates from context
+## workexp
+- Only include actual employment (not academic projects or internships at universities)
+- companyName and position are required; use "" if truly unreadable
+- summary: list of bullet strings describing responsibilities/achievements
+- skills: max 7 most relevant technical skills per position
 
-# Skills Extraction Rules
-- For each position, identify maximum 7 most relevant technical and conceptual skills
-- Include both technical skills (languages, tools, frameworks) and broader competencies (testing methodologies, domain knowledge)
-- When similar technologies appear (like PostgreSQL, MySQL, PL/SQL), select only the most representative one
-- Prioritize skills that directly relate to the described responsibilities
-- If the resume has a section for skills, add all of them into the skills section.
+## personal_projects
+- Academic projects, side projects, course projects all go here — never in workexp
+- projectName is required; use "" only if completely unreadable
+- highlights: bullet strings describing what was built or achieved
+- keywords: technologies and tools used
 
-# Formatting Guidelines
-- Convert any gendered pronouns to gender-neutral alternatives
-- Format dates in YYYY-MM-DD format when possible
+## skills
+- Global skills list from the dedicated skills section of the resume
+- Exclude natural spoken languages (English, French, etc.)
+- Include writing, literature review, and similar professional skills
 
-- For education entries with single dates, assume it's the graduation date
-- Match any provided links to appropriate fields (LinkedIn, GitHub, personal website)
-- Include achievements in the awards section
-- Add any github, linkedin and personal website links found in the resume.
-- If a link pointing to a domain github.com but is not a repository, it is their github link.
-- Add a simple summary section summarizing the entire candidate profile in 3 sentences. Highlight key parts of their resume in these sentences.
+## awards
+- Only actual awards/honours (Dean's List, scholarships, competition wins)
+- Do NOT include work experience entries as awards
 
-- Include any research paper publications in the publications section.
-- Do not include natural languages like english, french in the skills section. Writing, literature review and similar language skills should be included.
-
-
-# Critical Classification Rules
-  - **Academic projects** must ONLY go in personal_projects section, never in work experience
-  - Identify academic projects by presence of:
-      - University/school names in organization field
-      - Course names (e.g., "Advanced Web Application Development")
-      - Semester/year indicators (Fall 2012, Spring 2012)
-  - Awards are only classified as such if is an award for performance or something similar. Work experience is not an award.
-
-
-# Work Experience Requirements
-
-  Only include positions that:
-  - Have explicit employment indicators: "Software Engineer", "Employed at", "Worked at"
-  - Show duration patterns matching employment (not academic semesters)
+# Resume text:
 """
 
 
