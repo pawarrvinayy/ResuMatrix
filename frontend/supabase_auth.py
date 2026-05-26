@@ -1,10 +1,20 @@
 from supabase import create_client
-from app.core.config import settings
+from pathlib import Path
+from dotenv import dotenv_values
 import logging
 
 logger = logging.getLogger(__name__)
 
-supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+# Explicitly load from frontend/.env so the correct legacy JWT anon key is
+# always used, regardless of any SUPABASE_KEY set in the process environment
+# (e.g. the root .env sb_publishable_ key being sourced in the shell).
+_env_path = Path(__file__).resolve().parent / ".env"
+_env = dotenv_values(_env_path)
+
+_SUPABASE_URL = _env.get("SUPABASE_URL", "")
+_SUPABASE_KEY = _env.get("SUPABASE_KEY", "")
+
+supabase = create_client(_SUPABASE_URL, _SUPABASE_KEY)
 
 def register_user(email: str, password: str, username: str) -> bool:
     try:
