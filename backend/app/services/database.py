@@ -11,14 +11,17 @@ class DatabaseService:
         self.client: Client = create_client(url, key)
     
     # Job CRUD functions
-    async def create_job(self, job_text: str, user_id: str) -> Optional[Job]:
+    async def create_job(self, job_text: str, user_id: str, job_title: str = None) -> Optional[Job]:
         """Creates a new job posting in the database"""
         try:
-            result = self.client.table("jobs").insert({
+            row = {
                 "job_text": job_text,
                 "status": 0,
                 "user_id": user_id,
-                }).execute()
+            }
+            if job_title:
+                row["job_title"] = job_title
+            result = self.client.table("jobs").insert(row).execute()
             return Job.model_validate(result.data[0])
         except Exception as e:
             logger.error(f"Error creating job: {str(e)}")
@@ -90,17 +93,28 @@ class DatabaseService:
             logger.error(f"Error creating resume: {str(e)}")
             raise
 
-    async def create_resumes(self, job_id: str, resume_text_list: List[str]) -> List[Resume]:
+    async def create_resumes(
+        self,
+        job_id: str,
+        resume_text_list: List[str],
+        filenames: List[str] = None,
+        candidate_names: List[str] = None,
+    ) -> List[Resume]:
         """Creates multiple resumes given a job_id"""
-        resume_list = [
-                {
-                    "job_id": job_id,
-                    "resume_text": resume_text,
-                    "status": -2,
-                    "fit_probability": 0,
-                    "feedback_label": 0,
-                 } for resume_text in resume_text_list
-            ]
+        resume_list = []
+        for i, resume_text in enumerate(resume_text_list):
+            row = {
+                "job_id": job_id,
+                "resume_text": resume_text,
+                "status": -2,
+                "fit_probability": 0,
+                "feedback_label": 0,
+            }
+            if filenames:
+                row["filename"] = filenames[i]
+            if candidate_names:
+                row["candidate_name"] = candidate_names[i]
+            resume_list.append(row)
         try:
             result = self.client.table("resumes").insert(resume_list).execute()
             return ResumeList.model_validate({"resume_list": result.data}).resume_list

@@ -10,6 +10,7 @@ class Job(BaseModel):
     created_at: datetime
     job_text: str
     status: int
+    job_title: str | None = None
 
 class JobList(BaseModel):
     job_list: List[Job]
@@ -22,7 +23,9 @@ class Resume(BaseModel):
     status: int
     fit_probability: float
     feedback_label: int
-    section_scores: str | None
+    section_scores: str | None = None
+    filename: str | None = None
+    candidate_name: str | None = None
 
 class ResumeList(BaseModel):
     resume_list: List[Resume]

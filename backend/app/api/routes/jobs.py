@@ -20,7 +20,11 @@ async def create_job(data: dict = Body(...),
                      db_service: DatabaseService = Depends(get_db_service)
                      ):
     try:
-        job = await db_service.create_job(data["job_text"], data["user_id"])
+        job = await db_service.create_job(
+            data["job_text"],
+            data["user_id"],
+            job_title=data.get("job_title"),
+        )
         LOG.info(f"Job created with id: {job.id}")
         return JSONResponse(content={"job": jsonable_encoder(job)})
     except Exception as e:
@@ -56,6 +60,8 @@ async def upload_resume_files(
             raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     try:
         resume_text_list = []
+        filenames = []
+        candidate_names = []
         for file in files:
             contents = await file.read()
             pdf_stream = io.BytesIO(contents)
@@ -64,8 +70,13 @@ async def upload_resume_files(
                 for page_num in range(len(pdf_doc)):
                     text += pdf_doc[page_num].get_text("text")
             resume_text_list.append(text)
+            fname = file.filename or "resume.pdf"
+            filenames.append(fname)
+            # Derive human name: strip extension, replace separators, title-case
+            stem = fname.rsplit(".", 1)[0]
+            candidate_names.append(stem.replace("_", " ").replace("-", " ").title())
 
-        resumes = await db_service.create_resumes(job_id, resume_text_list)
+        resumes = await db_service.create_resumes(job_id, resume_text_list, filenames, candidate_names)
 
         public_urls = await storage_service.upload_resumes(job_id, files, resumes)
         background_tasks.add_task(_run_simple_ranker, job_id)
