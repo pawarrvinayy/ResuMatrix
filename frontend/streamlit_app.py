@@ -132,6 +132,28 @@ h1, h2, h3, h4 { color: #f0f2f7 !important; font-weight: 700; letter-spacing: -0
 .score-bar-fill { height: 4px; border-radius: 2px; }
 .score-row-pct { font-size: 0.75rem; font-weight: 600; width: 34px; text-align: right; flex-shrink: 0; }
 
+/* ── Reasoning layer ── */
+.card-summary {
+    font-size: 0.82rem; color: #6b7280; font-style: italic;
+    line-height: 1.55; margin-top: 14px;
+    padding-top: 12px; border-top: 1px solid #1e2235;
+}
+.missing-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-top: 10px;
+}
+.missing-label {
+    font-size: 0.68rem; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.08em; flex-shrink: 0;
+}
+.missing-pill {
+    display: inline-block;
+    background: #ef444414; color: #f87171;
+    border: 1px solid #ef444430;
+    border-radius: 4px; padding: 2px 8px;
+    font-size: 0.72rem; font-weight: 600;
+}
+
 /* ── Inputs ── */
 [data-testid="stTextInput"] input,
 [data-testid="stTextArea"] textarea,
@@ -499,13 +521,15 @@ def progress_bar_html(label: str, score: float) -> str:
 
 def resume_card_html(rank_label: str, candidate_name: str, filename: str,
                      fit_probability: float, section_scores: dict | None,
-                     badge_class: str = "rank-badge") -> str:
+                     badge_class: str = "rank-badge",
+                     summary: str | None = None,
+                     missing_keywords: list | None = None) -> str:
     overall_pct = round(fit_probability * 100)
     color = score_color(overall_pct)
     extra_class = "ranked" if badge_class == "rank-badge" else "unfit-card"
     gauge_svg = arc_gauge_svg(overall_pct, color, size=82)
 
-    section_html = ""
+    bars = ""
     if section_scores:
         label_map = {
             "skills": "Skills",
@@ -513,12 +537,35 @@ def resume_card_html(rank_label: str, candidate_name: str, filename: str,
             "education": "Education",
             "projects": "Projects",
         }
-        bars = ""
         for key, display in label_map.items():
             if key in section_scores:
                 bars += progress_bar_html(display, section_scores[key])
-        if bars:
-            section_html = f"<div class='score-section'>{bars}</div>"
+
+    # Summary (italic quote)
+    summary_html = ""
+    if summary:
+        summary_html = f"<div class='card-summary'>\u201c{summary}\u201d</div>"
+
+    # Missing keywords pills
+    missing_html = ""
+    if missing_keywords:
+        pills = "".join(f"<span class='missing-pill'>{kw}</span>" for kw in missing_keywords)
+        missing_html = (
+            f"<div class='missing-row'>"
+            f"<span class='missing-label'>Missing</span>"
+            f"{pills}"
+            f"</div>"
+        )
+
+    section_html = ""
+    if bars or summary_html or missing_html:
+        section_html = (
+            f"<div class='score-section'>"
+            f"{bars}"
+            f"{summary_html}"
+            f"{missing_html}"
+            f"</div>"
+        )
 
     return (
         f"<div class='rm-card {extra_class}'>"
@@ -1009,6 +1056,14 @@ elif st.session_state.next_page == "results_page" and st.session_state.show_resu
             except (json.JSONDecodeError, TypeError):
                 section_scores = None
 
+        missing_keywords = None
+        raw_missing = resume.get("missing_keywords")
+        if raw_missing:
+            try:
+                missing_keywords = json.loads(raw_missing) if isinstance(raw_missing, str) else raw_missing
+            except (json.JSONDecodeError, TypeError):
+                missing_keywords = None
+
         rank_num = resume["status"]
         fit_prob = resume.get("fit_probability") or 0.0
 
@@ -1020,6 +1075,8 @@ elif st.session_state.next_page == "results_page" and st.session_state.show_resu
                 fit_probability=fit_prob,
                 section_scores=section_scores,
                 badge_class="rank-badge",
+                summary=resume.get("summary"),
+                missing_keywords=missing_keywords,
             ),
             unsafe_allow_html=True,
         )
@@ -1057,6 +1114,14 @@ elif st.session_state.next_page == "results_page" and st.session_state.show_resu
                 except (json.JSONDecodeError, TypeError):
                     section_scores = None
 
+            missing_keywords = None
+            raw_missing = resume.get("missing_keywords")
+            if raw_missing:
+                try:
+                    missing_keywords = json.loads(raw_missing) if isinstance(raw_missing, str) else raw_missing
+                except (json.JSONDecodeError, TypeError):
+                    missing_keywords = None
+
             fit_prob = resume.get("fit_probability") or 0.0
 
             st.markdown(
@@ -1067,6 +1132,8 @@ elif st.session_state.next_page == "results_page" and st.session_state.show_resu
                     fit_probability=fit_prob,
                     section_scores=section_scores,
                     badge_class="unfit-badge",
+                    summary=resume.get("summary"),
+                    missing_keywords=missing_keywords,
                 ),
                 unsafe_allow_html=True,
             )

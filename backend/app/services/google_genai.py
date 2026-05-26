@@ -1,7 +1,6 @@
 import logging
 import asyncio
-from google import genai
-from google.genai.types import EmbedContentConfig, EmbedContentResponse
+from openai import AsyncOpenAI
 from typing import Dict, List, Optional, Union
 from asyncio import Semaphore
 from aiolimiter import AsyncLimiter
@@ -19,16 +18,11 @@ logger = logging.getLogger('uvicorn.error')
 class GoogleGenAIService:
     """Manages interactions with Google's GenAI services."""
     
-    def __init__(self, gemini_key: str, rate_limit_per_min: int = 100): 
-
-        """
-        Initialize the GenAI client 
-        Ensure gcloud auth is setup with all the necessary env 
-        variables such as GOOGLE_CLOUD_PROJECT, credentials json
-        """
-        self.client = genai.Client(api_key=gemini_key)
+    def __init__(self, openai_key: str, rate_limit_per_min: int = 100):
+        """Initialize the OpenAI async client for embeddings and LLM calls."""
+        self.client = AsyncOpenAI(api_key=openai_key)
         self.rate_limit_per_min = rate_limit_per_min
-        self.embedding_model_name = "models/text-embedding-004"
+        self.embedding_model_name = "text-embedding-3-small"
 
         # These values are initialized only once during startup using the setup function
         self.semaphore: Optional[Semaphore] = None
@@ -48,22 +42,18 @@ class GoogleGenAIService:
             async with self.semaphore:
                 try:
                     logger.info(f"Processing {section_name} batch {batch_id} with {len(inputs)} inputs")
-                    embedding_config = EmbedContentConfig(
-                        task_type="RETRIEVAL_DOCUMENT",
-                        output_dimensionality=768,
-                        title=f"Resume: {section_name.capitalize()}"
-                    )
-                    response = await self.client.aio.models.embed_content(
+                    response = await self.client.embeddings.create(
                         model=self.embedding_model_name,
-                        contents=inputs,
-                        config=embedding_config)
-                    
+                        input=inputs,
+                        dimensions=768,
+                    )
+
                     batch_results = []
-                    for (resume_id, section), embedding_data in zip(metadata, response.embeddings):
+                    for (resume_id, section), embedding_data in zip(metadata, response.data):
                         embedding_id = '_'.join([job_id, str(resume_id), section])
                         embedding_dict = {
                             "id": embedding_id,
-                            "values": embedding_data.values,
+                            "values": embedding_data.embedding,
                             "metadata": {"job_id": job_id}
                         }
 
@@ -138,60 +128,37 @@ class GoogleGenAIService:
     
 
     async def fetch_job_text_embeddings(self, job_text: str, output_dim: int = 768) -> Optional[List[float]]:
-        """
-        Generate embedding vector for a job posting.
-        
-        Args:
-
-            job_post_text: The text of the job posting
-            output_dim: Dimensionality of output embeddings
-        
-        Returns:
-            The embedding, List[float]
-        """
+        """Generate embedding vector for a job posting."""
         try:
             logger.info("Generating embedding for job posting")
-
-            embedding_config = EmbedContentConfig(
-                        task_type="RETRIEVAL_DOCUMENT",
-                        output_dimensionality=output_dim,
-                        title=f"Job Posting"
-                    ) 
-
-            response = await self.client.aio.models.embed_content(
-                    model=self.embedding_model_name,
-                    contents=job_text,
-                    config=embedding_config)
+            response = await self.client.embeddings.create(
+                model=self.embedding_model_name,
+                input=job_text,
+                dimensions=output_dim,
+            )
             logger.info("Successfully generated job posting embedding")
-            return response.embeddings[0].values if response.embeddings is not None else []
+            return response.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating job posting embedding: {str(e)}")
             raise
 
 
     @RetryManager.retry_decorator(pydantic_model=Resume, max_attempts=MAX_ATTEMPTS)
-    async def generate_resume_json(self, resume_text: str, links_str: str = '', 
-                                   model: str = settings.LLM_DEFAULT) -> str:
-        """Generate structured JSON from resume text using LLM."""
-
-        # Construct prompt
+    async def generate_resume_json(self, resume_text: str, links_str: str = '',
+                                   model: str = settings.GPT_DEFAULT) -> str:
+        """Generate structured JSON from resume text using GPT-4o-mini."""
         prompt = ResumePromptTemplates.get_resume_prompt_template() + resume_text + links_str
-        
-        # Call LLM
 
-        response = await self.client.aio.models.generate_content(
+        response = await self.client.chat.completions.create(
             model=model,
-            contents=prompt,
-            config={
-                'response_mime_type': 'application/json',
-                'response_schema': Resume,
-                'temperature': settings.LLM_TEMPERATURE,
-                'top_p': settings.LLM_TOP_P,
-                'stop_sequences': settings.LLM_STOP_SEQUENCES
-            }
-
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "You are a precise resume parser. Return ONLY valid JSON, no other text."},
+                {"role": "user", "content": prompt},
+            ],
         )
-        return response.text 
+        return response.choices[0].message.content
 
 
     async def process_single_resume(self, candidate_id: Union[int, str], resume_text: str, 

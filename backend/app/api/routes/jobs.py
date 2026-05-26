@@ -177,7 +177,7 @@ async def trigger_ranking_process(
     try:
         job = await db_service.get_job(job_id)
         resumes = await db_service.get_resumes_with_job_id(job_id)
-        filtered_resumes = [resume for resume in resumes if resume and resume.status == 0]
+        filtered_resumes = [resume for resume in resumes if resume and resume.status != -2]
         background_tasks.add_task(res_processing_service.run_ranking, job_id, job.job_text, filtered_resumes)
         return JSONResponse(content="", status_code=202)
     except Exception as e:

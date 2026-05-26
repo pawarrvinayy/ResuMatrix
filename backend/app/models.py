@@ -26,6 +26,9 @@ class Resume(BaseModel):
     section_scores: str | None = None
     filename: str | None = None
     candidate_name: str | None = None
+    reasoning: str | None = None
+    summary: str | None = None
+    missing_keywords: str | None = None
 
 class ResumeList(BaseModel):
     resume_list: List[Resume]
