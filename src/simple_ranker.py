@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from supabase import create_client
+from xgboost_scorer import score_candidate
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -293,9 +294,15 @@ for i, resume in enumerate(resumes):
     print("    Scoring...")
     result = intelligent_scorer(jd_req, profile)
     scores = result["scores"]
+
+    # 4d. Blend GPT overall score with XGBoost fit probability
+    xgb_score = score_candidate(scores, result["missing_keywords"])
+    blended_overall = round(0.6 * scores["overall"] + 0.4 * (xgb_score * 100), 1)
+    scores["overall"] = blended_overall
+
     print(f"    Scores → skills:{scores['skills']} exp:{scores['experience']} "
           f"edu:{scores['education']} proj:{scores['projects']} "
-          f"overall:{scores['overall']}")
+          f"overall:{scores['overall']} (xgb:{xgb_score})")
     print(f"    Summary: {result['summary']}")
     print(f"    Missing: {result['missing_keywords']}")
 
